@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+outputs/
+pretrained_models/
+*.wav
+*.mp3
+*.flac
+!inputs/.gitkeep
+!outputs/.gitkeep

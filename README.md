@@ -1,77 +1,74 @@
-# Spleeter Stem Separation (5 Stems)
+# Spleeter Model
 
-Pemisahan instrumen dari lagu menggunakan model **5 stems** dari [deezer/spleeter](https://github.com/deezer/spleeter).
-
-Model ini memisahkan audio menjadi **5 stem**:
-
-| Stem | Deskripsi |
-|------|-----------|
-| `vocals` | Vokal |
-| `drums` | Drum/percussion |
-| `bass` | Bass |
-| `piano` | Piano |
-| `other` | Instrumen lainnya |
-
-## Prasyarat
-
-Spleeter membutuhkan **ffmpeg** dan **libsndfile**:
-
-```bash
-# macOS
-brew install ffmpeg libsndfile
-```
-
-> **Catatan Python:** Spleeter membutuhkan Python 3.9–3.11 (TensorFlow belum mendukung Python 3.14). Gunakan conda jika perlu:
-> ```bash
-> conda create -n spleeter python=3.11 -y
-> conda activate spleeter
-> conda install -c conda-forge ffmpeg libsndfile -y
-> ```
+A Python CLI for separating a music mix into five WAV stems with Deezer's pretrained `spleeter:5stems` model. It processes one or more tracks and can write a JSON report for each track. The report measures how well the stems reconstruct the mix and, when reference stems are supplied, how closely each estimate matches its source. [Upstream Spleeter project](https://github.com/deezer/spleeter)
 
 ## Setup
 
-Spleeter membutuhkan **Python 3.9–3.11** (TensorFlow belum mendukung Python 3.12+).
+Use Python 3.11 for the TensorFlow versions pinned in this repository. Install FFmpeg (including `ffprobe`) and libsndfile. The first separation downloads the pretrained model weights.
 
-### macOS (Apple Silicon) — direkomendasikan
-
-```bash
-chmod +x setup-macos.sh
-./setup-macos.sh
-conda activate /path/to/Spleeter/.venv
+```sh
+git clone https://github.com/ameliacitradewi/Spleeter-Model.git
+cd Spleeter-Model
 ```
 
-Atau manual:
+### macOS on Apple silicon
 
-```bash
-conda create -p .venv python=3.11 ffmpeg libsndfile -y -c conda-forge
-conda activate .venv
-pip install -r requirements-macos.txt --no-deps
-pip install -r requirements.txt
+With Conda installed, create the environment and install the TensorFlow and Metal versions listed in [`requirements-macos.txt`](requirements-macos.txt).
+
+```sh
+conda create --prefix ./.venv -c conda-forge python=3.11 ffmpeg libsndfile pip -y
+conda activate ./.venv
+python -m pip install tensorflow-macos==2.12.0 tensorflow-metal==1.0.0 -r requirements.txt
+python -m pip install --no-deps spleeter==2.4.2
 ```
 
-### Linux / Windows
+The manual commands install TensorFlow's dependencies before installing Spleeter with `--no-deps`. This lets the project use its Apple silicon TensorFlow build while keeping Spleeter's upstream TensorFlow pin from replacing it. [Apple TensorFlow setup](https://developer.apple.com/metal/tensorflow-plugin/) · [Spleeter package requirements](https://github.com/deezer/spleeter/blob/master/pyproject.toml)
 
-```bash
+### Linux and Windows
+
+Install FFmpeg and libsndfile for your platform and make sure the FFmpeg tools are on `PATH`. Create a Python 3.11 environment and follow the commands for your platform. [Spleeter system dependencies](https://github.com/deezer/spleeter/wiki/1.-Installation)
+
+**Linux**
+
+```sh
 python3.11 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements-linux.txt --no-deps
-pip install -r requirements.txt
+python -m pip install -r requirements-linux.txt -r requirements.txt
 ```
 
-> Model pretrained (`5stems`) akan diunduh otomatis saat pertama kali dijalankan (~250 MB).
+**Windows (PowerShell)**
 
-## Penggunaan
-
-Letakkan file lagu di folder `inputs/`, lalu jalankan:
-
-```bash
-python run.py inputs/lagu.mp3
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install tensorflow==2.12.1 -r requirements.txt
+.\.venv\Scripts\python.exe -m pip install --no-deps spleeter==2.4.2
 ```
 
-Output disimpan di:
+Use `.\.venv\Scripts\python.exe` in place of `python` in the examples below if the Windows environment is inactive. The separate Spleeter install bypasses its exact TensorFlow I/O pin, which has no Windows x64 wheel for Python 3.11.
 
+## Separate audio
+
+Run the CLI with one input path or a list of paths. A 44.1 kHz WAV is a convenient starting point when evaluation is enabled.
+
+```sh
+python run.py inputs/track.wav
+python run.py inputs/track-a.wav inputs/track-b.wav --output-dir results
+python run.py inputs/track.mp3 --duration 120 --skip-eval
+python run.py inputs/track.wav --reference-dir references/track
 ```
-outputs/spleeter_5stems/<nama_lagu>/
+
+| Argument | Behavior |
+| --- | --- |
+| `input [input ...]` | One or more input audio files. Use unique base names for separate output folders. |
+| `-o`, `--output-dir` | Output root. Defaults to `outputs`. |
+| `--duration` | Maximum seconds to process from the start of each track. Defaults to `600`. |
+| `--reference-dir` | Folder of reference WAVs for one track. For separate reference sets, evaluate each track in its own invocation. |
+| `--skip-eval` | Saves the separated WAVs and skips metric computation. Useful when FFmpeg can decode the input but the evaluation reader cannot. |
+
+A successful separation of `track.wav` writes the following files. The model outputs are saved as floating-point WAVs. `metrics.json` is written when evaluation completes.
+
+```text
+outputs/spleeter_5stems/track/
 ├── vocals.wav
 ├── drums.wav
 ├── bass.wav
@@ -80,59 +77,21 @@ outputs/spleeter_5stems/<nama_lagu>/
 └── metrics.json
 ```
 
-### Opsi tambahan
+## Evaluate separation
 
-```bash
-# Tentukan folder output
-python run.py inputs/lagu.wav -o outputs
+| Report section | What it measures |
+| --- | --- |
+| `reconstruction` | SI-SDR, correlation, and mean absolute error between the original mix and the sum of the estimated stems |
+| `per_stem` | RMS, peak, crest factor, RMS ratio relative to the mix, spectral centroid, and spectral bandwidth |
+| `bss_eval` | SDR, SIR, SAR, and SI-SDR for matched reference stems, plus an unweighted mean across those stems |
 
-# Proses audio lebih panjang (default max 600 detik)
-python run.py inputs/lagu.mp3 --duration 900
+Name reference files after the corresponding output stems, such as `vocals.wav` or `drums.wav`. Evaluation loads audio at 44.1 kHz, computes comparisons in mono, and truncates signals to a shared length. Align references to the input's starting point before evaluating. Reconstruction scores show how well the stems add up to the mix. Reference-based scores measure how well they reproduce individual sources.
 
-# Evaluasi dengan ground-truth stems (untuk SDR/SIR/SAR)
-python run.py inputs/lagu.wav --reference-dir references/lagu/
+## Project files
 
-# Hanya pisahkan tanpa evaluasi
-python run.py inputs/lagu.mp3 --skip-eval
-```
-
-## Metrik Evaluasi
-
-File `metrics.json` berisi:
-
-### Tanpa ground-truth (selalu dihitung)
-
-| Metrik | Keterangan |
-|--------|------------|
-| `mix_reconstruction_si_sdr_db` | Seberapa baik jumlah semua stem merekonstruksi mix asli |
-| `mix_reconstruction_correlation` | Korelasi antara mix asli vs jumlah stem |
-| `mix_reconstruction_mae` | Mean absolute error rekonstruksi |
-| `per_stem.*` | RMS, peak, crest factor, energy ratio, spectral centroid/bandwidth per stem |
-
-### Dengan ground-truth (`--reference-dir`)
-
-| Metrik | Keterangan |
-|--------|------------|
-| `sdr_db` | Signal-to-Distortion Ratio |
-| `sir_db` | Signal-to-Interference Ratio |
-| `sar_db` | Signal-to-Artifacts Ratio |
-| `si_sdr_db` | Scale-Invariant SDR |
-
-## Struktur Project
-
-```
-.
-├── run.py              # CLI utama
-├── requirements.txt
-├── inputs/             # Tempat file audio input
-├── outputs/            # Hasil pemisahan + metrics.json
-└── src/
-    ├── separate.py     # Logika pemisahan spleeter:5stems
-    ├── evaluate.py     # Perhitungan metrik evaluasi
-    └── utils.py        # Helper audio I/O
-```
-
-## Referensi
-
-- [Spleeter - Deezer source separation library](https://github.com/deezer/spleeter)
-- Preset model: `spleeter:5stems` (vocals / drums / bass / piano / other)
+| File | Responsibility |
+| --- | --- |
+| [`run.py`](run.py) | CLI arguments, single-track and batch orchestration, and metric summaries |
+| [`src/separate.py`](src/separate.py) | Loads and reuses the Spleeter separator, then saves the five model outputs |
+| [`src/evaluate.py`](src/evaluate.py) | Reconstruction, per-stem statistics, and reference-based evaluation |
+| [`src/utils.py`](src/utils.py) | Audio I/O, resampling, and output paths |
